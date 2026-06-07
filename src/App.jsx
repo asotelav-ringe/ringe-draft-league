@@ -1,5 +1,19 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
+import { useNavigate, useLocation } from "react-router-dom";
 import { supabase } from "./supabaseClient";
+
+// Mapa entre la sección interna (tab) y la URL pública (slug).
+const TAB_TO_PATH = {
+  home: "/",
+  board: "/draft-board",
+  coaches: "/entrenadores",
+  teams: "/equipos",
+  matchups: "/matchups",
+  trades: "/intercambios",
+};
+const PATH_TO_TAB = Object.fromEntries(
+  Object.entries(TAB_TO_PATH).map(([tab, path]) => [path, tab])
+);
 
 // ============ DATOS DEL DRAFT POOL (mismos Pokémon y costos que la WDL) ============
 const RAW = [
@@ -467,15 +481,22 @@ function Nav({ tab, setTab }) {
   return (
     <nav style={{ display:"flex", gap:6, flexWrap:"wrap", marginBottom:28 }}>
       {tabs.map(([k, label]) => (
-        <button key={k} className="rl-display" onClick={() => setTab(k)} style={{
-          background: tab===k ? "var(--accent)" : "transparent",
-          color: tab===k ? "#fff" : "var(--ink-dim)",
-          border: "1px solid " + (tab===k ? "var(--accent-soft)" : "var(--line)"),
-          padding: "10px 20px", borderRadius: 9, fontWeight: 600, fontSize: 14,
-          cursor: "pointer", fontFamily: "'Oswald',sans-serif", transition: "all .15s",
-          letterSpacing: ".05em",
-          boxShadow: tab===k ? "0 4px 14px -4px rgba(194,22,26,0.6)" : "none"
-        }}>{label}</button>
+        <a key={k} href={TAB_TO_PATH[k]} className="rl-display"
+          onClick={(e) => {
+            // Permite abrir en pestaña nueva con Ctrl/Cmd/click central.
+            if (e.metaKey || e.ctrlKey || e.shiftKey || e.button === 1) return;
+            e.preventDefault();
+            setTab(k);
+          }}
+          style={{
+            background: tab===k ? "var(--accent)" : "transparent",
+            color: tab===k ? "#fff" : "var(--ink-dim)",
+            border: "1px solid " + (tab===k ? "var(--accent-soft)" : "var(--line)"),
+            padding: "10px 20px", borderRadius: 9, fontWeight: 600, fontSize: 14,
+            cursor: "pointer", fontFamily: "'Oswald',sans-serif", transition: "all .15s",
+            letterSpacing: ".05em", textDecoration: "none", display: "inline-block",
+            boxShadow: tab===k ? "0 4px 14px -4px rgba(194,22,26,0.6)" : "none"
+          }}>{label}</a>
       ))}
     </nav>
   );
@@ -1379,7 +1400,11 @@ const resultBtn = (active) => ({ background: active?"var(--accent)":"var(--chip)
 const stepBtn = { width:28, height:28, borderRadius:7, border:"1px solid var(--line)", background:"var(--chip)", color:"var(--ink)", fontWeight:800, fontSize:16, cursor:"pointer", fontFamily:"inherit", lineHeight:1, display:"grid", placeItems:"center" };
 
 export default function App() {
-  const [tab, setTab] = useState("home");
+  const navigate = useNavigate();
+  const location = useLocation();
+  // La sección activa se deriva de la URL. Si la ruta no existe, mostramos Inicio.
+  const tab = PATH_TO_TAB[location.pathname] || "home";
+  const setTab = (k) => navigate(TAB_TO_PATH[k] || "/");
   const [state, setState] = useState(null);
   const [saving, setSaving] = useState(false);
   const [unlocked, setUnlocked] = useState(false);
