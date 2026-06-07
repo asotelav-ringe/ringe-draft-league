@@ -728,6 +728,10 @@ function StatCard({ label, value, onClick }) {
 function Coaches({ state, setState, unlocked }) {
   const [trainer, setTrainer] = useState("");
   const [team, setTeam] = useState("");
+  // edición inline
+  const [editId, setEditId] = useState(null);
+  const [editTrainer, setEditTrainer] = useState("");
+  const [editTeam, setEditTeam] = useState("");
 
   const add = () => {
     if (!trainer.trim() || !team.trim()) return;
@@ -746,6 +750,22 @@ function Coaches({ state, setState, unlocked }) {
         matches: s.matches.filter(m => m.a !== id && m.b !== id),
       };
     });
+  };
+  const startEdit = (c) => {
+    setEditId(c.id); setEditTrainer(c.trainer); setEditTeam(c.team);
+  };
+  const cancelEdit = () => {
+    setEditId(null); setEditTrainer(""); setEditTeam("");
+  };
+  const saveEdit = (id) => {
+    if (!editTrainer.trim() || !editTeam.trim()) { alert("El nombre del entrenador y del equipo no pueden quedar vacíos."); return; }
+    setState(s => ({
+      ...s,
+      coaches: s.coaches.map(c =>
+        c.id === id ? { ...c, trainer: editTrainer.trim(), team: editTeam.trim() } : c
+      ),
+    }));
+    cancelEdit();
   };
 
   return (
@@ -768,21 +788,38 @@ function Coaches({ state, setState, unlocked }) {
             {state.coaches.map(c => {
               const spent = (state.picks[c.id]||[]).reduce((s,id)=>s+(POOL.find(p=>p.id===id)?.cost||0),0);
               const count = (state.picks[c.id]||[]).length;
+              const editing = editId === c.id;
               return (
                 <div key={c.id} style={{
-                  display:"flex", justifyContent:"space-between", alignItems:"center",
+                  display:"flex", justifyContent:"space-between", alignItems:"center", gap:14, flexWrap:"wrap",
                   background:"var(--panel)", border:"1px solid var(--line)", padding:"14px 18px", borderRadius:12
                 }}>
-                  <div>
-                    <div className="rl-display" style={{ fontWeight:700, fontSize:19 }}>{c.team}</div>
-                    <div style={{ color:"var(--ink-dim)", fontSize:13 }}>{c.trainer}</div>
-                  </div>
-                  <div style={{ display:"flex", alignItems:"center", gap:18 }}>
-                    <div style={{ textAlign:"right" }}>
-                      <div style={{ fontWeight:800, color:"var(--accent)" }}>{spent}<span style={{color:"var(--ink-dim)",fontWeight:500}}>/{BUDGET} pts</span></div>
-                      <div style={{ color:"var(--ink-dim)", fontSize:12 }}>{count} pokémon</div>
-                    </div>
-                    {unlocked && <button onClick={()=>remove(c.id)} style={btnGhost}>Eliminar</button>}
+                  {editing
+                    ? <div style={{ display:"flex", gap:10, flexWrap:"wrap", alignItems:"flex-end", flex:1, minWidth:260 }}>
+                        <Field label="Nombre del equipo" value={editTeam} onChange={setEditTeam} placeholder="Nombre del equipo" />
+                        <Field label="Nombre de entrenador" value={editTrainer} onChange={setEditTrainer} placeholder="Nombre de entrenador" />
+                      </div>
+                    : <div>
+                        <div className="rl-display" style={{ fontWeight:700, fontSize:19 }}>{c.team}</div>
+                        <div style={{ color:"var(--ink-dim)", fontSize:13 }}>{c.trainer}</div>
+                      </div>}
+                  <div style={{ display:"flex", alignItems:"center", gap:14 }}>
+                    {!editing && (
+                      <div style={{ textAlign:"right" }}>
+                        <div style={{ fontWeight:800, color:"var(--accent)" }}>{spent}<span style={{color:"var(--ink-dim)",fontWeight:500}}>/{BUDGET} pts</span></div>
+                        <div style={{ color:"var(--ink-dim)", fontSize:12 }}>{count} pokémon</div>
+                      </div>
+                    )}
+                    {unlocked && (editing
+                      ? <div style={{ display:"flex", gap:8 }}>
+                          <button onClick={()=>saveEdit(c.id)} style={btnPrimary}>Guardar</button>
+                          <button onClick={cancelEdit} style={btnGhost}>Cancelar</button>
+                        </div>
+                      : <div style={{ display:"flex", gap:8 }}>
+                          <button onClick={()=>startEdit(c)} style={btnGhost}>Editar</button>
+                          <button onClick={()=>remove(c.id)} style={btnGhost}>Eliminar</button>
+                        </div>
+                    )}
                   </div>
                 </div>
               );
