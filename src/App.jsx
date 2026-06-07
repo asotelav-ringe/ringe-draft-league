@@ -796,8 +796,8 @@ function Coaches({ state, setState, unlocked }) {
                 }}>
                   {editing
                     ? <div style={{ display:"flex", gap:10, flexWrap:"wrap", alignItems:"flex-end", flex:1, minWidth:260 }}>
-                        <Field label="Nombre del equipo" value={editTeam} onChange={setEditTeam} placeholder="Nombre del equipo" />
                         <Field label="Nombre de entrenador" value={editTrainer} onChange={setEditTrainer} placeholder="Nombre de entrenador" />
+                        <Field label="Nombre del equipo" value={editTeam} onChange={setEditTeam} placeholder="Nombre del equipo" />
                       </div>
                     : <div>
                         <div className="rl-display" style={{ fontWeight:700, fontSize:19 }}>{c.team}</div>
