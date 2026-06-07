@@ -881,10 +881,10 @@ function Board({ state, setState, unlocked }) {
                 {myPicks.map(id => {
                   const p = POOL.find(x=>x.id===id);
                   return (
-                    <span key={id} onClick={()=>unpick(id, activeCoach)} title="Quitar"
-                      style={{ display:"flex", alignItems:"center", gap:4, background:"var(--chip)", borderRadius:8, padding:"3px 8px 3px 3px", cursor:"pointer", fontSize:12, fontWeight:600 }}>
+                    <span key={id} onClick={()=> unlocked && unpick(id, activeCoach)} title={unlocked ? "Quitar" : "Bloqueado"}
+                      style={{ display:"flex", alignItems:"center", gap:4, background:"var(--chip)", borderRadius:8, padding:"3px 8px 3px 3px", cursor: unlocked ? "pointer" : "default", fontSize:12, fontWeight:600, opacity: unlocked ? 1 : 0.85 }}>
                       <Sprite id={id} name={p?.name} size={26} />
-                      {p?.name} ×
+                      {p?.name} {unlocked && "×"}
                     </span>
                   );
                 })}
@@ -914,16 +914,16 @@ function Board({ state, setState, unlocked }) {
                 const teamFull = myPicks.length >= MAX_TEAM;
                 const affordable = p.cost <= myRemaining && !teamFull;
                 return (
-                  <div key={p.id} onClick={()=> taken ? (mine && unpick(p.id, activeCoach)) : pick(p)}
+                  <div key={p.id} onClick={()=> unlocked && (taken ? (mine && unpick(p.id, activeCoach)) : pick(p))}
                     style={{
                       display:"grid", gridTemplateColumns:"56px 1fr 1fr 1fr 70px", alignItems:"center",
                       padding:"6px 16px", borderBottom:"1px solid var(--line)",
-                      cursor: taken ? (mine?"pointer":"not-allowed") : (affordable?"pointer":"not-allowed"),
+                      cursor: !unlocked ? "default" : (taken ? (mine?"pointer":"not-allowed") : (affordable?"pointer":"not-allowed")),
                       opacity: taken && !mine ? .42 : (!affordable && !taken ? .55 : 1),
                       background: mine ? "rgba(194,22,26,0.14)" : "transparent",
                       transition:"background .12s"
                     }}
-                    onMouseEnter={e=>{ if(!(taken&&!mine)) e.currentTarget.style.background = mine?"rgba(194,22,26,0.24)":"var(--hover)"; }}
+                    onMouseEnter={e=>{ if(unlocked && !(taken&&!mine)) e.currentTarget.style.background = mine?"rgba(194,22,26,0.24)":"var(--hover)"; }}
                     onMouseLeave={e=>{ e.currentTarget.style.background = mine?"rgba(194,22,26,0.14)":"transparent"; }}
                   >
                     <Sprite id={p.id} name={p.name} size={44} />
@@ -1435,8 +1435,13 @@ export default function App() {
     return () => clearTimeout(t);
   }, [state]);
 
-  // setState directo: la edición se controla por la UI (botones ocultos si bloqueado).
-  const guardedSetState = setState;
+  // Protege TODAS las escrituras: si la liga está bloqueada, ninguna acción
+  // (draftear, quitar picks, marcar resultados, intercambios…) modifica el estado.
+  // Esto es la salvaguarda real; ocultar botones en la UI es solo cosmético.
+  const guardedSetState = (updater) => {
+    if (!unlocked) return;
+    setState(updater);
+  };
 
   const toggleLock = () => {
     if (unlocked) { setUnlocked(false); return; }
