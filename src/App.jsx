@@ -660,13 +660,13 @@ function Home({ state, setTab }) {
         </>
       )}
 
-      <Rules />
+      <Rules state={state} />
     </div>
   );
 }
 
 // Reglas de la liga (adaptadas de la WDL con nuestras condiciones).
-function Rules() {
+function Rules({ state }) {
   const H = ({ children }) => (
     <h3 className="rl-display" style={{ fontSize:20, fontWeight:700, margin:"28px 0 10px", color:"var(--silver)", display:"flex", alignItems:"center", gap:10 }}>
       <span style={{ width:5, height:20, background:"var(--accent)", borderRadius:2 }} />{children}
