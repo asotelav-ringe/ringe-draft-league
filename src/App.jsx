@@ -1485,6 +1485,30 @@ export default function App() {
     setPwInput(""); setPwError(false); setShowPwModal(true);
   };
 
+  // Descarga una copia completa del estado actual de la liga como archivo JSON.
+  // Es solo lectura: no modifica nada en la base de datos.
+  const exportBackup = () => {
+    try {
+      const payload = {
+        _backup: "ringe-draft-league",
+        _exportedAt: new Date().toISOString(),
+        state,
+      };
+      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `ringe-backup-${today}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      alert("No se pudo generar el respaldo: " + (e?.message || e));
+    }
+  };
+
   const submitPassword = () => {
     if (pwInput === EDIT_PASSWORD) {
       setUnlocked(true);
@@ -1576,6 +1600,14 @@ export default function App() {
                 background:"rgba(0,0,0,0.45)", padding:"4px 10px", borderRadius:999,
                 border:"1px solid var(--line)", backdropFilter:"blur(4px)"
               }}>{saving?"Guardando…":"Guardado ✓"}</span>
+              {unlocked && (
+                <button onClick={exportBackup} title="Descargar una copia de la liga (JSON)" style={{
+                  fontSize:12, fontWeight:700, cursor:"pointer", fontFamily:"'Oswald',sans-serif",
+                  color:"var(--silver)", background:"rgba(0,0,0,0.45)",
+                  padding:"5px 11px", borderRadius:999, border:"1px solid var(--line)",
+                  backdropFilter:"blur(4px)", textTransform:"uppercase", letterSpacing:".04em"
+                }}>⬇ Respaldo</button>
+              )}
               <button onClick={toggleLock} title={unlocked?"Bloquear edición":"Desbloquear edición"} style={{
                 fontSize:12, fontWeight:700, cursor:"pointer", fontFamily:"'Oswald',sans-serif",
                 color: unlocked?"#0a0708":"var(--silver)",
