@@ -393,22 +393,28 @@ function subscribeState(onChange) {
 
 const uid = () => Math.random().toString(36).slice(2, 9);
 
-// Devuelve un Set con los IDs de Pokémon que un equipo recibió por intercambio
-// (sea trade entre equipos o cambio con el pool). Se usa para marcarlos en la
-// vista de equipos y en el campeón. Solo cuenta los que siguen en el roster.
-function tradedInIds(state, coachId) {
-  const ids = new Set();
+// Para cada Pokémon que un equipo recibió por intercambio y que sigue en su
+// roster, devuelve qué Pokémon dio a cambio en esa misma operación.
+// Resultado: Map( idQueEntró -> [idsQueSalieron] ). En cambios con el pool es
+// 1 a 1; en trades entre equipos puede haber varios, así que se asocia el lote
+// completo de lo que salió en esa operación.
+function tradedInDetail(state, coachId) {
+  const roster = new Set(state.picks[coachId] || []);
+  const map = new Map();
   (state.trades || []).forEach(t => {
     if (t.kind === "pool") {
-      if (t.coach === coachId) ids.add(t.in);
+      if (t.coach === coachId && roster.has(t.in)) {
+        map.set(t.in, [t.out]);
+      }
     } else {
-      // En un swap, A recibe lo que cedió B y viceversa.
-      if (t.a === coachId) (t.bGave || []).forEach(id => ids.add(id));
-      if (t.b === coachId) (t.aGave || []).forEach(id => ids.add(id));
+      // A recibe bGave y entrega aGave; B al revés.
+      let received = [], gave = [];
+      if (t.a === coachId) { received = t.bGave || []; gave = t.aGave || []; }
+      else if (t.b === coachId) { received = t.aGave || []; gave = t.bGave || []; }
+      received.forEach(id => { if (roster.has(id)) map.set(id, gave); });
     }
   });
-  const roster = new Set(state.picks[coachId] || []);
-  return new Set([...ids].filter(id => roster.has(id)));
+  return map;
 }
 
 
@@ -863,7 +869,8 @@ function Home({ state, setTab, unlocked, logAction }) {
 
   // Bloque visual de una posición del podio (con su equipo).
   const PodiumPlace = ({ id, place }) => {
-    const traded = tradedInIds(state, id);
+    const tradeDetail = tradedInDetail(state, id);
+    const monById = (x) => POOL.find(p=>p.id===x);
     const medal = place===1?"🥇":place===2?"🥈":"🥉";
     const label = place===1?"Campeón":place===2?"Subcampeón":"3er lugar";
     const mons = (state.picks[id] || []).map(x=>POOL.find(p=>p.id===x)).filter(Boolean).sort((a,b)=>b.cost-a.cost);
@@ -879,16 +886,21 @@ function Home({ state, setTab, unlocked, logAction }) {
         {mons.length>0 && (
           <div style={{ display:"flex", flexWrap:"wrap", gap:6, justifyContent:"center", marginTop:12 }}>
             {mons.map(p => {
-              const wasTraded = traded.has(p.id);
+              const gaveOut = tradeDetail.get(p.id);
+              const wasTraded = !!gaveOut;
+              const outNames = (gaveOut || []).map(monById).filter(Boolean).map(o=>o.name).join(", ");
               return (
-                <div key={p.id} title={`${p.name} · ${p.cost} pts${wasTraded?" · llegó por intercambio":""}`} style={{
+                <div key={p.id} title={`${p.name} · ${p.cost} pts${wasTraded?` · a cambio de ${outNames}`:""}`} style={{
                   position:"relative", display:"flex", flexDirection:"column", alignItems:"center", gap:2,
                   background:"rgba(0,0,0,0.3)", border:"1px solid " + (wasTraded?"var(--accent)":"rgba(255,255,255,0.08)"),
-                  borderRadius:10, padding:"6px 8px", minWidth:52
+                  borderRadius:10, padding:"6px 8px", minWidth:52, maxWidth:74
                 }}>
                   {wasTraded && <span style={{ position:"absolute", top:-6, right:-6, fontSize:9, fontWeight:800, color:"#fff", background:"var(--accent)", borderRadius:999, padding:"1px 5px" }}>⇄</span>}
                   <Sprite id={p.id} name={p.name} size={40} />
                   <span style={{ fontSize:9, color:"var(--silver)", fontWeight:600, textAlign:"center", lineHeight:1.1 }}>{p.name}</span>
+                  {wasTraded && outNames && (
+                    <span style={{ fontSize:8, color:"var(--accent-soft)", fontWeight:600, textAlign:"center", lineHeight:1.1 }}>↩ {outNames}</span>
+                  )}
                 </div>
               );
             })}
@@ -1331,13 +1343,14 @@ function Board({ state, setState, unlocked, logAction }) {
 function Teams({ state }) {
   if (state.coaches.length === 0) return <><SectionTitle title="Equipos" /><Empty msg="No hay entrenadores aún." /></>;
   const budget = state.settings.budget;
+  const monById = (id) => POOL.find(p=>p.id===id);
   return (
     <div>
       <SectionTitle title="Equipos" sub="Así quedaron los rosters de cada entrenador. Los Pokémon marcados con ⇄ llegaron por intercambio." />
       <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill, minmax(320px,1fr))", gap:18 }}>
         {state.coaches.map(c => {
           const ids = state.picks[c.id] || [];
-          const traded = tradedInIds(state, c.id);
+          const tradeDetail = tradedInDetail(state, c.id);
           const mons = ids.map(id => POOL.find(p=>p.id===id)).filter(Boolean).sort((a,b)=>b.cost-a.cost);
           const spent = mons.reduce((s,m)=>s+m.cost,0);
           return (
@@ -1356,13 +1369,27 @@ function Teams({ state }) {
                 ? <div style={{ padding:24, textAlign:"center", color:"var(--ink-dim)", fontSize:13 }}>Sin pokémon drafteados</div>
                 : <div style={{ padding:10 }}>
                     {mons.map(m => {
-                      const wasTraded = traded.has(m.id);
+                      const gaveOut = tradeDetail.get(m.id); // ids que salieron a cambio (o undefined)
+                      const wasTraded = !!gaveOut;
+                      const outMons = (gaveOut || []).map(monById).filter(Boolean);
                       return (
-                        <div key={m.id} style={{ display:"flex", alignItems:"center", gap:10, padding:"5px 8px", borderRadius:8, background: wasTraded ? "rgba(194,22,26,0.08)" : "transparent" }}>
+                        <div key={m.id} style={{ display:"flex", alignItems:"center", gap:10, padding:"6px 8px", borderRadius:8, background: wasTraded ? "rgba(194,22,26,0.08)" : "transparent" }}>
                           <Sprite id={m.id} name={m.name} size={42} />
-                          <div style={{ flex:1, fontWeight:700, fontSize:14, display:"flex", alignItems:"center", gap:6 }}>
-                            {m.name}
-                            {wasTraded && <span title="Llegó por intercambio" style={{ fontSize:9, fontWeight:800, color:"#fff", background:"var(--accent)", borderRadius:999, padding:"2px 6px", letterSpacing:".04em", textTransform:"uppercase" }}>⇄ Cambio</span>}
+                          <div style={{ flex:1, minWidth:0 }}>
+                            <div style={{ fontWeight:700, fontSize:14, display:"flex", alignItems:"center", gap:6, flexWrap:"wrap" }}>
+                              {m.name}
+                              {wasTraded && <span title="Llegó por intercambio" style={{ fontSize:9, fontWeight:800, color:"#fff", background:"var(--accent)", borderRadius:999, padding:"2px 6px", letterSpacing:".04em", textTransform:"uppercase" }}>⇄ Cambio</span>}
+                            </div>
+                            {wasTraded && outMons.length>0 && (
+                              <div style={{ display:"flex", alignItems:"center", gap:5, marginTop:3, color:"var(--ink-dim)", fontSize:11, flexWrap:"wrap" }}>
+                                <span>a cambio de</span>
+                                {outMons.map(o => (
+                                  <span key={o.id} style={{ display:"inline-flex", alignItems:"center", gap:3, fontWeight:600 }}>
+                                    <Sprite id={o.id} name={o.name} size={18} />{o.name}
+                                  </span>
+                                ))}
+                              </div>
+                            )}
                           </div>
                           <div style={{ display:"flex", gap:4 }}>{m.types.map(t=><TypeBadge key={t} t={t} />)}</div>
                           <div style={{ fontWeight:800, width:28, textAlign:"right" }}>{m.cost}</div>
