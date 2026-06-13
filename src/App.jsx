@@ -1309,7 +1309,82 @@ function Trades({ state, setState, unlocked, logAction }) {
   const cTrainer = (id) => state.coaches.find(c=>c.id===id)?.trainer || "";
   const mon = (id) => POOL.find(p=>p.id===id);
   const maxTrade = state.settings.maxTrade;
+  const budget = state.settings.budget;
 
+  // Costo total del roster actual de un equipo.
+  const rosterCost = (coachId, roster) =>
+    (roster || state.picks[coachId] || []).reduce((sum, id) => sum + (mon(id)?.cost || 0), 0);
+
+  // Cuántos Pokémon ha movido un equipo en toda la temporada, sumando los
+  // trades entre equipos (lo que cedió en aGave/bGave) y los cambios con el
+  // pool (cada cambio con el pool gasta 1 movimiento). Este conteo es el que
+  // no puede superar maxTrade.
+  const tradedCount = (coachId) =>
+    (state.trades || []).reduce((n, t) => {
+      if (t.kind === "pool") {
+        return n + (t.coach === coachId ? 1 : 0);
+      }
+      let c = 0;
+      if (t.a === coachId) c += (t.aGave || []).length;
+      if (t.b === coachId) c += (t.bGave || []).length;
+      return n + c;
+    }, 0);
+
+  // Conjunto de todos los Pokémon ya drafteados por cualquier equipo (no
+  // disponibles para el cambio con el pool).
+  const draftedIds = new Set(
+    state.coaches.flatMap(c => state.picks[c.id] || [])
+  );
+
+  // ----- Cambio con el pool (1 por 1) -----
+  const [poolCoach, setPoolCoach] = useState("");
+  const [poolOut, setPoolOut] = useState("");   // pokemon que sale del equipo
+  const [poolIn, setPoolIn] = useState("");     // pokemon del pool que entra
+  const [poolSearch, setPoolSearch] = useState("");
+
+  const resetPool = () => { setPoolOut(""); setPoolIn(""); setPoolSearch(""); };
+
+  const poolRoster = poolCoach ? (state.picks[poolCoach] || []) : [];
+  const poolRemaining = poolCoach ? (maxTrade - tradedCount(poolCoach)) : 0;
+  // Pokémon disponibles en el pool: los que nadie ha drafteado, filtrados por búsqueda.
+  const poolAvailable = POOL
+    .filter(p => !draftedIds.has(p.id))
+    .filter(p => p.name.toLowerCase().includes(poolSearch.trim().toLowerCase()))
+    .sort((a,b) => b.cost - a.cost);
+
+  const confirmPoolSwap = () => {
+    if (!poolCoach) { alert("Elige un equipo."); return; }
+    if (!poolOut)   { alert("Elige el Pokémon que sale del equipo."); return; }
+    if (!poolIn)    { alert("Elige el Pokémon que entra desde el pool."); return; }
+    if (poolRemaining <= 0) {
+      alert(`${cName(poolCoach)} ya alcanzó el máximo de ${maxTrade} Pokémon intercambiados en la temporada.`);
+      return;
+    }
+    const outMon = mon(Number(poolOut));
+    const inMon  = mon(Number(poolIn));
+    // Validar presupuesto tras el cambio.
+    const newCost = rosterCost(poolCoach) - (outMon?.cost || 0) + (inMon?.cost || 0);
+    if (newCost > budget) {
+      alert(`Con este cambio el equipo gastaría ${newCost} pts, superando el presupuesto de ${budget}. Elige un Pokémon de costo menor.`);
+      return;
+    }
+    const outId = Number(poolOut), inId = Number(poolIn);
+    setState(s => {
+      const picks = { ...s.picks };
+      const roster = [...(picks[poolCoach] || [])];
+      picks[poolCoach] = roster.filter(id => id !== outId).concat(inId);
+      const trade = {
+        id: uid(), ts: Date.now(), kind: "pool",
+        coach: poolCoach, out: outId, in: inId,
+      };
+      return { ...s, picks, trades: [...(s.trades||[]), trade] };
+    });
+    logAction?.(`Cambio con el pool: ${cName(poolCoach)} soltó ${outMon?.name} y tomó ${inMon?.name}`);
+    resetPool();
+    alert("Cambio con el pool realizado.");
+  };
+
+  // ----- Intercambio entre equipos -----
   const [aId, setAId] = useState("");
   const [bId, setBId] = useState("");
   const [aGive, setAGive] = useState([]); // pokemon ids que cede A
@@ -1318,10 +1393,16 @@ function Trades({ state, setState, unlocked, logAction }) {
   const aPicks = aId ? (state.picks[aId] || []) : [];
   const bPicks = bId ? (state.picks[bId] || []) : [];
 
-  const toggle = (list, setList, id) => {
-    if (list.includes(id)) setList(list.filter(x=>x!==id));
-    else if (list.length < maxTrade) setList([...list, id]);
-    else alert(`Máximo ${maxTrade} Pokémon por entrenador en cada intercambio.`);
+  const aRemaining = aId ? (maxTrade - tradedCount(aId)) : 0;
+  const bRemaining = bId ? (maxTrade - tradedCount(bId)) : 0;
+
+  const toggle = (list, setList, id, remaining, who) => {
+    if (list.includes(id)) { setList(list.filter(x=>x!==id)); return; }
+    if (list.length >= remaining) {
+      alert(`${who} solo puede ceder ${remaining} Pokémon más esta temporada (máximo ${maxTrade} en total).`);
+      return;
+    }
+    setList([...list, id]);
   };
 
   const reset = () => { setAGive([]); setBGive([]); };
@@ -1329,9 +1410,16 @@ function Trades({ state, setState, unlocked, logAction }) {
   const confirmTrade = () => {
     if (!aId || !bId || aId===bId) { alert("Elige dos entrenadores distintos."); return; }
     if (aGive.length === 0 || bGive.length === 0) { alert("Cada entrenador debe ceder al menos 1 Pokémon."); return; }
+    if (aGive.length > aRemaining) { alert(`${cName(aId)} excede su cupo de intercambios de la temporada.`); return; }
+    if (bGive.length > bRemaining) { alert(`${cName(bId)} excede su cupo de intercambios de la temporada.`); return; }
     if (aGive.length !== bGive.length) {
       if (!confirm(`El intercambio no es parejo (${aGive.length} por ${bGive.length}). ¿Continuar de todas formas?`)) return;
     }
+    // Validar presupuesto de ambos equipos tras el intercambio.
+    const aNewCost = rosterCost(aId) - aGive.reduce((n,id)=>n+(mon(id)?.cost||0),0) + bGive.reduce((n,id)=>n+(mon(id)?.cost||0),0);
+    const bNewCost = rosterCost(bId) - bGive.reduce((n,id)=>n+(mon(id)?.cost||0),0) + aGive.reduce((n,id)=>n+(mon(id)?.cost||0),0);
+    if (aNewCost > budget) { alert(`${cName(aId)} quedaría en ${aNewCost} pts, superando el presupuesto de ${budget}.`); return; }
+    if (bNewCost > budget) { alert(`${cName(bId)} quedaría en ${bNewCost} pts, superando el presupuesto de ${budget}.`); return; }
     setState(s => {
       const picks = { ...s.picks };
       const aRost = [...(picks[aId]||[])];
@@ -1342,7 +1430,7 @@ function Trades({ state, setState, unlocked, logAction }) {
       picks[aId] = aAfter;
       picks[bId] = bAfter;
       const trade = {
-        id: uid(), ts: Date.now(),
+        id: uid(), ts: Date.now(), kind: "swap",
         a: aId, b: bId,
         aGave: [...aGive], bGave: [...bGive],
       };
@@ -1356,6 +1444,17 @@ function Trades({ state, setState, unlocked, logAction }) {
   };
 
   const undoTrade = (t) => {
+    if (t.kind === "pool") {
+      if (!confirm("¿Revertir este cambio con el pool? El Pokémon volverá al equipo y el otro al pool.")) return;
+      setState(s => {
+        const picks = { ...s.picks };
+        const roster = [...(picks[t.coach]||[])];
+        picks[t.coach] = roster.filter(id => id !== t.in).concat(t.out);
+        return { ...s, picks, trades: (s.trades||[]).filter(x=>x.id!==t.id) };
+      });
+      logAction?.(`Revirtió un cambio con el pool de ${cName(t.coach)}`);
+      return;
+    }
     if (!confirm("¿Revertir este intercambio? Los Pokémon volverán a sus equipos originales.")) return;
     setState(s => {
       const picks = { ...s.picks };
@@ -1374,17 +1473,17 @@ function Trades({ state, setState, unlocked, logAction }) {
   const trades = [...(state.trades||[])].sort((x,y)=>(y.ts||0)-(x.ts||0));
   const fmtDate = (ts) => { try { return new Date(ts).toLocaleDateString("es",{day:"numeric",month:"short"}); } catch { return ""; } };
 
-  if (state.coaches.length < 2)
-    return <><SectionTitle title="Intercambios" /><Empty msg="Necesitas al menos 2 entrenadores registrados." /></>;
+  if (state.coaches.length < 1)
+    return <><SectionTitle title="Intercambios" /><Empty msg="Necesitas al menos 1 entrenador registrado." /></>;
 
-  const PickList = ({ picks, selected, setSel, otherId }) => (
+  const PickList = ({ picks, selected, setSel, remaining, who }) => (
     <div style={{ display:"flex", flexWrap:"wrap", gap:6, marginTop:8 }}>
       {picks.length===0
         ? <span style={{ color:"var(--ink-dim)", fontSize:13 }}>Sin Pokémon</span>
         : picks.map(id => {
             const p = mon(id); const on = selected.includes(id);
             return (
-              <button key={id} onClick={()=>toggle(selected, setSel, id)} style={{
+              <button key={id} onClick={()=>toggle(selected, setSel, id, remaining, who)} style={{
                 display:"flex", alignItems:"center", gap:5, cursor:"pointer", fontFamily:"inherit",
                 background: on?"var(--accent)":"var(--chip)", color: on?"#fff":"var(--ink)",
                 border:"1px solid " + (on?"var(--accent-soft)":"var(--line)"),
@@ -1400,9 +1499,100 @@ function Trades({ state, setState, unlocked, logAction }) {
 
   return (
     <div>
-      <SectionTitle title="Intercambios" sub="Registra los traspasos de Pokémon entre entrenadores (máx. 2 por lado en la ventana de mitad de temporada)." />
+      <SectionTitle title="Intercambios" sub={`Cada equipo puede mover hasta ${maxTrade} Pokémon en la temporada, sumando cambios con el pool e intercambios entre equipos. Ningún equipo puede superar el presupuesto de ${budget} pts.`} />
 
-      {/* crear intercambio */}
+      {/* ===== Cambio con el pool (1 por 1) — va primero ===== */}
+      <div className="rl-display" style={{ fontSize:16, fontWeight:700, margin:"4px 0 12px", color:"var(--silver)" }}>Cambio con el pool</div>
+      {unlocked
+        ? <div style={{ background:"var(--panel)", border:"1px solid var(--line)", borderRadius:14, padding:18, marginBottom:26 }}>
+            <div style={{ fontSize:12, color:"var(--ink-dim)", marginBottom:14 }}>
+              Cambia un Pokémon de tu equipo por uno que nadie haya drafteado (1 por 1).
+            </div>
+            <Label>Equipo</Label>
+            <select value={poolCoach} onChange={e=>{setPoolCoach(e.target.value); resetPool();}} style={{...inputStyle, cursor:"pointer", width:"100%"}}>
+              <option value="">—</option>
+              {state.coaches.map(c=><option key={c.id} value={c.id}>{c.team} ({c.trainer})</option>)}
+            </select>
+
+            {poolCoach && <>
+              <div style={{ display:"flex", gap:16, fontSize:12, color:"var(--ink-dim)", margin:"10px 0 0" }}>
+                <span>Presupuesto: <strong style={{color: rosterCost(poolCoach)>budget?"var(--accent)":"var(--silver)"}}>{rosterCost(poolCoach)}/{budget} pts</strong></span>
+                <span>Cambios restantes: <strong style={{color: poolRemaining<=0?"var(--accent)":"var(--silver)"}}>{Math.max(0,poolRemaining)}/{maxTrade}</strong></span>
+              </div>
+
+              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:18, marginTop:14 }}>
+                {/* sale */}
+                <div>
+                  <div style={{ fontSize:12, color:"var(--ink-dim)", marginBottom:6 }}>Sale del equipo:</div>
+                  <div style={{ display:"flex", flexWrap:"wrap", gap:6 }}>
+                    {poolRoster.length===0
+                      ? <span style={{ color:"var(--ink-dim)", fontSize:13 }}>Sin Pokémon</span>
+                      : poolRoster.map(id => {
+                          const p = mon(id); const on = Number(poolOut)===id;
+                          return (
+                            <button key={id} onClick={()=>setPoolOut(on?"":String(id))} style={{
+                              display:"flex", alignItems:"center", gap:5, cursor:"pointer", fontFamily:"inherit",
+                              background: on?"var(--accent)":"var(--chip)", color: on?"#fff":"var(--ink)",
+                              border:"1px solid " + (on?"var(--accent-soft)":"var(--line)"),
+                              borderRadius:8, padding:"3px 9px 3px 3px", fontSize:12, fontWeight:600
+                            }}>
+                              <Sprite id={id} name={p?.name} size={24} />
+                              {p?.name} <span style={{opacity:.7}}>· {p?.cost}p</span>
+                            </button>
+                          );
+                        })}
+                  </div>
+                </div>
+                {/* entra */}
+                <div>
+                  <div style={{ fontSize:12, color:"var(--ink-dim)", marginBottom:6 }}>Entra desde el pool:</div>
+                  <input
+                    value={poolSearch}
+                    onChange={e=>setPoolSearch(e.target.value)}
+                    placeholder="Buscar Pokémon disponible…"
+                    style={{...inputStyle, width:"100%", marginBottom:8}}
+                  />
+                  <div style={{ display:"flex", flexWrap:"wrap", gap:6, maxHeight:180, overflowY:"auto" }}>
+                    {poolAvailable.length===0
+                      ? <span style={{ color:"var(--ink-dim)", fontSize:13 }}>Ningún Pokémon disponible.</span>
+                      : poolAvailable.slice(0, 60).map(p => {
+                          const on = Number(poolIn)===p.id;
+                          return (
+                            <button key={p.id} onClick={()=>setPoolIn(on?"":String(p.id))} style={{
+                              display:"flex", alignItems:"center", gap:5, cursor:"pointer", fontFamily:"inherit",
+                              background: on?"var(--accent)":"var(--chip)", color: on?"#fff":"var(--ink)",
+                              border:"1px solid " + (on?"var(--accent-soft)":"var(--line)"),
+                              borderRadius:8, padding:"3px 9px 3px 3px", fontSize:12, fontWeight:600
+                            }}>
+                              <Sprite id={p.id} name={p.name} size={24} />
+                              {p.name} <span style={{opacity:.7}}>· {p.cost}p</span>
+                            </button>
+                          );
+                        })}
+                  </div>
+                </div>
+              </div>
+
+              {poolOut && poolIn && (() => {
+                const newCost = rosterCost(poolCoach) - (mon(Number(poolOut))?.cost||0) + (mon(Number(poolIn))?.cost||0);
+                const over = newCost > budget;
+                return (
+                  <div style={{ fontSize:13, marginTop:14, color: over?"var(--accent-soft)":"var(--ink-dim)", fontWeight:600 }}>
+                    Presupuesto tras el cambio: {newCost}/{budget} pts {over ? "— supera el límite" : "✓"}
+                  </div>
+                );
+              })()}
+
+              <div style={{ display:"flex", gap:10, marginTop:16, alignItems:"center" }}>
+                <button onClick={confirmPoolSwap} style={btnPrimary}>Confirmar cambio</button>
+                {(poolOut||poolIn||poolSearch) && <button onClick={resetPool} style={btnGhost}>Limpiar selección</button>}
+              </div>
+            </>}
+          </div>
+        : <LockedNote />}
+
+      {/* ===== Intercambio entre equipos ===== */}
+      <div className="rl-display" style={{ fontSize:16, fontWeight:700, margin:"4px 0 12px", color:"var(--silver)" }}>Intercambio entre equipos</div>
       {unlocked
         ? <div style={{ background:"var(--panel)", border:"1px solid var(--line)", borderRadius:14, padding:18, marginBottom:26 }}>
             <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:18 }}>
@@ -1413,8 +1603,8 @@ function Trades({ state, setState, unlocked, logAction }) {
                   <option value="">—</option>
                   {state.coaches.filter(c=>c.id!==bId).map(c=><option key={c.id} value={c.id}>{c.team} ({c.trainer})</option>)}
                 </select>
-                {aId && <><div style={{ fontSize:12, color:"var(--ink-dim)", marginTop:10 }}>Cede (máx. 2):</div>
-                  <PickList picks={aPicks} selected={aGive} setSel={setAGive} /></>}
+                {aId && <><div style={{ fontSize:12, color:"var(--ink-dim)", marginTop:10 }}>Cede (le quedan {Math.max(0,aRemaining)} de {maxTrade} esta temporada):</div>
+                  <PickList picks={aPicks} selected={aGive} setSel={setAGive} remaining={aRemaining} who={cName(aId)} /></>}
               </div>
               {/* lado B */}
               <div>
@@ -1423,8 +1613,8 @@ function Trades({ state, setState, unlocked, logAction }) {
                   <option value="">—</option>
                   {state.coaches.filter(c=>c.id!==aId).map(c=><option key={c.id} value={c.id}>{c.team} ({c.trainer})</option>)}
                 </select>
-                {bId && <><div style={{ fontSize:12, color:"var(--ink-dim)", marginTop:10 }}>Cede (máx. 2):</div>
-                  <PickList picks={bPicks} selected={bGive} setSel={setBGive} /></>}
+                {bId && <><div style={{ fontSize:12, color:"var(--ink-dim)", marginTop:10 }}>Cede (le quedan {Math.max(0,bRemaining)} de {maxTrade} esta temporada):</div>
+                  <PickList picks={bPicks} selected={bGive} setSel={setBGive} remaining={bRemaining} who={cName(bId)} /></>}
               </div>
             </div>
             <div style={{ display:"flex", gap:10, marginTop:16, alignItems:"center" }}>
@@ -1442,14 +1632,25 @@ function Trades({ state, setState, unlocked, logAction }) {
             {trades.map(t => (
               <div key={t.id} style={{ background:"var(--panel)", border:"1px solid var(--line)", borderRadius:12, padding:"14px 16px" }}>
                 <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:10 }}>
-                  <div style={{ fontSize:12, color:"var(--ink-dim)" }}>{fmtDate(t.ts)}</div>
+                  <div style={{ fontSize:12, color:"var(--ink-dim)" }}>
+                    {fmtDate(t.ts)}
+                    <span style={{ marginLeft:8, padding:"1px 8px", borderRadius:999, background:"var(--chip)", border:"1px solid var(--line)", fontSize:10, fontWeight:700, textTransform:"uppercase", letterSpacing:".04em" }}>
+                      {t.kind==="pool" ? "Pool" : "Equipos"}
+                    </span>
+                  </div>
                   {unlocked && <button onClick={()=>undoTrade(t)} style={btnGhost}>Revertir</button>}
                 </div>
-                <div style={{ display:"grid", gridTemplateColumns:"1fr auto 1fr", gap:10, alignItems:"center" }}>
-                  <TradeSide team={cName(t.a)} trainer={cTrainer(t.a)} gives={t.aGave} mon={mon} align="right" />
-                  <div style={{ fontSize:20 }}>⇄</div>
-                  <TradeSide team={cName(t.b)} trainer={cTrainer(t.b)} gives={t.bGave} mon={mon} align="left" />
-                </div>
+                {t.kind==="pool"
+                  ? <div style={{ display:"grid", gridTemplateColumns:"1fr auto 1fr", gap:10, alignItems:"center" }}>
+                      <TradeSide team={cName(t.coach)} trainer={cTrainer(t.coach)} gives={[t.out]} mon={mon} align="right" />
+                      <div style={{ fontSize:20 }}>⇄</div>
+                      <TradeSide team="Pool" trainer="entra al equipo" gives={[t.in]} mon={mon} align="left" />
+                    </div>
+                  : <div style={{ display:"grid", gridTemplateColumns:"1fr auto 1fr", gap:10, alignItems:"center" }}>
+                      <TradeSide team={cName(t.a)} trainer={cTrainer(t.a)} gives={t.aGave} mon={mon} align="right" />
+                      <div style={{ fontSize:20 }}>⇄</div>
+                      <TradeSide team={cName(t.b)} trainer={cTrainer(t.b)} gives={t.bGave} mon={mon} align="left" />
+                    </div>}
               </div>
             ))}
           </div>}
@@ -1524,7 +1725,7 @@ function Settings({ state, setState, unlocked, logAction }) {
     { key: "budget",     label: "Puntos a gastar por entrenador",        hint: "Presupuesto que cada entrenador tiene para draftear." },
     { key: "maxCoaches", label: "Cantidad máxima de equipos",            hint: "Tope de entrenadores que se pueden registrar." },
     { key: "maxPicks",   label: "Máximo de Pokémon a draftear",          hint: "Cuántos Pokémon puede tener cada equipo." },
-    { key: "maxTrade",   label: "Máximo de Pokémon a intercambiar",      hint: "Cuántos Pokémon puede ceder cada lado en un intercambio (después del draft)." },
+    { key: "maxTrade",   label: "Máximo de Pokémon a intercambiar",      hint: "Cuántos Pokémon puede mover cada equipo en toda la temporada (sumando cambios con el pool e intercambios entre equipos)." },
   ];
 
   const onChange = (key, val) => {
