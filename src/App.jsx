@@ -770,12 +770,12 @@ function Home({ state, setTab, unlocked, logAction }) {
   // El podio existe cuando hay final reportada.
   const podium = champion ? [champion, runnerUp, third].filter(Boolean) : [];
 
-  // Última ronda con al menos un resultado reportado.
-  const playedRounds = done.filter(m=>!m.final).map(m=>m.round);
-  const lastRound = playedRounds.length ? Math.max(...playedRounds) : null;
-  const lastRoundMatches = lastRound
-    ? allMatches.filter(m => !m.final && m.round === lastRound)
-    : [];
+  // Últimos 6 partidos reportados (round-robin, sin contar la final), ordenados
+  // del más reciente al más antiguo según el sello de tiempo de cuando se decidió.
+  const recentMatches = allMatches
+    .filter(m => !m.final && isDoneM(m))
+    .sort((a, b) => (b.ts || 0) - (a.ts || 0))
+    .slice(0, 6);
 
   const fmtDate = (ts) => {
     if (!ts) return "";
@@ -900,7 +900,7 @@ function Home({ state, setTab, unlocked, logAction }) {
 
   return (
     <div>
-      <SectionTitle title="Inicio" sub="Resumen de la liga y los resultados de la última ronda." />
+      <SectionTitle title="Inicio" sub="Resumen de la liga y los últimos resultados reportados." />
 
       {/* PODIO */}
       {champion && (
@@ -934,14 +934,14 @@ function Home({ state, setTab, unlocked, logAction }) {
         <StatCard label="Pokémon drafteados" value={Object.values(state.picks||{}).reduce((n,a)=>n+a.length,0)} onClick={()=>setTab("board")} />
       </div>
 
-      {/* resultados de la última ronda */}
+      {/* últimos resultados reportados */}
       <div className="rl-display" style={{ fontSize:18, fontWeight:700, margin:"0 0 14px", color:"var(--silver)" }}>
-        {lastRound ? `Resultados · Ronda ${lastRound}` : "Resultados"}
+        Últimos resultados
       </div>
-      {lastRoundMatches.length===0
+      {recentMatches.length===0
         ? <Empty msg="Todavía no hay resultados reportados. Ve a «Matchups» para empezar." />
         : <div style={{ display:"grid", gap:10 }}>
-            {lastRoundMatches.map(ResultCard)}
+            {recentMatches.map(ResultCard)}
           </div>}
 
       {/* final reportada también visible aquí */}
