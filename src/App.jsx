@@ -1164,7 +1164,7 @@ function Matchups({ state, setState, unlocked }) {
             <div key={rn} style={{ marginBottom:20 }}>
               <div style={{ fontSize:12, fontWeight:800, color:"var(--ink-dim)", textTransform:"uppercase", letterSpacing:".06em", marginBottom:8 }}>Ronda {rn}</div>
               <div style={{ display:"grid", gap:10 }}>
-                {rr.filter(m=>m.round===rn).map(m => <SeriesRow key={m.id} m={m} cName={cName} setScore={setScore} unlocked={unlocked} />)}
+                {rr.filter(m=>m.round===rn).map(m => <SeriesRow key={m.id} m={m} cName={cName} cTrainer={cTrainer} setScore={setScore} unlocked={unlocked} />)}
               </div>
             </div>
           ))}
@@ -1182,13 +1182,13 @@ function Matchups({ state, setState, unlocked }) {
                   {unlocked && <button onClick={createFinal} style={btnPrimary}>Crear final</button>}
                 </>}
           </div>
-        : <SeriesRow m={finalMatch} cName={cName} setScore={setScore} unlocked={unlocked} highlight />}
+        : <SeriesRow m={finalMatch} cName={cName} cTrainer={cTrainer} setScore={setScore} unlocked={unlocked} highlight />}
     </div>
   );
 }
 
 // Fila de una serie con marcador exacto editable.
-function SeriesRow({ m, cName, setScore, unlocked, highlight }) {
+function SeriesRow({ m, cName, cTrainer, setScore, unlocked, highlight }) {
   const need = m.final ? 3 : 2;
   const done = m.sa >= need || m.sb >= need;
   const winner = done ? (m.sa > m.sb ? m.a : m.b) : null;
@@ -1207,16 +1207,22 @@ function SeriesRow({ m, cName, setScore, unlocked, highlight }) {
       boxShadow: highlight ? "0 0 0 1px var(--accent), 0 8px 24px -10px rgba(194,22,26,0.5)" : "none"
     }}>
       <div style={{ display:"grid", gridTemplateColumns:"1fr auto 1fr", alignItems:"center", gap:10 }}>
-        <div style={{ textAlign:"right", fontWeight:700, fontSize:15, color: winner===m.a?"var(--accent)":"var(--ink)" }}>
-          {cName(m.a)} {winner===m.a && "🏆"}
+        <div style={{ textAlign:"right" }}>
+          <div style={{ fontWeight:700, fontSize:15, color: winner===m.a?"var(--accent)":"var(--ink)" }}>
+            {cName(m.a)} {winner===m.a && "🏆"}
+          </div>
+          {cTrainer && cTrainer(m.a) && <div style={{ fontSize:11, color:"var(--ink-dim)", marginTop:2 }}>{cTrainer(m.a)}</div>}
         </div>
         <div style={{ display:"flex", alignItems:"center", gap:12 }}>
           <Stepper side="a" val={m.sa} />
           <span style={{ color:"var(--ink-dim)", fontWeight:800 }}>–</span>
           <Stepper side="b" val={m.sb} />
         </div>
-        <div style={{ textAlign:"left", fontWeight:700, fontSize:15, color: winner===m.b?"var(--accent)":"var(--ink)" }}>
-          {winner===m.b && "🏆"} {cName(m.b)}
+        <div style={{ textAlign:"left" }}>
+          <div style={{ fontWeight:700, fontSize:15, color: winner===m.b?"var(--accent)":"var(--ink)" }}>
+            {winner===m.b && "🏆"} {cName(m.b)}
+          </div>
+          {cTrainer && cTrainer(m.b) && <div style={{ fontSize:11, color:"var(--ink-dim)", marginTop:2 }}>{cTrainer(m.b)}</div>}
         </div>
       </div>
       <div style={{ textAlign:"center", marginTop:8, fontSize:11, color:"var(--ink-dim)", textTransform:"uppercase", letterSpacing:".06em" }}>
@@ -1451,6 +1457,7 @@ export default function App() {
 
   // Evita re-guardar lo que acabamos de recibir del servidor.
   const skipNextSave = useRef(false);
+  const importInputRef = useRef(null);
 
   useEffect(() => {
     let alive = true;
@@ -1480,9 +1487,42 @@ export default function App() {
     setState(updater);
   };
 
-  const toggleLock = () => {
-    if (unlocked) { setUnlocked(false); return; }
-    setPwInput(""); setPwError(false); setShowPwModal(true);
+  // Restaura la liga desde un archivo JSON de respaldo. Sobreescribe TODO el estado.
+  // Protegido por candado + confirmación. Valida la forma antes de aplicar.
+  const importBackup = (file) => {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const parsed = JSON.parse(String(reader.result));
+        // Acepta tanto el formato con envoltorio {_backup, state} como un state plano.
+        const incoming = parsed && parsed.state ? parsed.state : parsed;
+        if (!incoming || typeof incoming !== "object") throw new Error("El archivo no tiene el formato esperado.");
+        if (!Array.isArray(incoming.coaches)) throw new Error("Falta la lista de entrenadores (coaches).");
+        // Normaliza para garantizar que todos los campos existen y tienen el tipo correcto.
+        const clean = {
+          coaches: Array.isArray(incoming.coaches) ? incoming.coaches : [],
+          picks: (incoming.picks && typeof incoming.picks === "object") ? incoming.picks : {},
+          matches: Array.isArray(incoming.matches) ? incoming.matches : [],
+          trades: Array.isArray(incoming.trades) ? incoming.trades : [],
+        };
+        const stamp = parsed && parsed._exportedAt ? `\nFecha del respaldo: ${new Date(parsed._exportedAt).toLocaleString()}` : "";
+        const ok = confirm(
+          `¿Restaurar la liga desde este respaldo?\n\n` +
+          `Entrenadores: ${clean.coaches.length}\n` +
+          `Partidos: ${clean.matches.length}\n` +
+          `Intercambios: ${clean.trades.length}` + stamp +
+          `\n\n⚠ Esto REEMPLAZA por completo los datos actuales de la liga. No se puede deshacer.`
+        );
+        if (!ok) return;
+        setState(clean);
+        alert("Respaldo restaurado. Los cambios ya se están guardando en la nube.");
+      } catch (e) {
+        alert("No se pudo importar el respaldo: " + (e?.message || e));
+      }
+    };
+    reader.onerror = () => alert("No se pudo leer el archivo.");
+    reader.readAsText(file);
   };
 
   // Descarga una copia completa del estado actual de la liga como archivo JSON.
@@ -1507,6 +1547,11 @@ export default function App() {
     } catch (e) {
       alert("No se pudo generar el respaldo: " + (e?.message || e));
     }
+  };
+
+  const toggleLock = () => {
+    if (unlocked) { setUnlocked(false); return; }
+    setPwInput(""); setPwError(false); setShowPwModal(true);
   };
 
   const submitPassword = () => {
@@ -1607,6 +1652,23 @@ export default function App() {
                   padding:"5px 11px", borderRadius:999, border:"1px solid var(--line)",
                   backdropFilter:"blur(4px)", textTransform:"uppercase", letterSpacing:".04em"
                 }}>⬇ Respaldo</button>
+              )}
+              {unlocked && (
+                <>
+                  <input
+                    ref={importInputRef}
+                    type="file"
+                    accept="application/json,.json"
+                    style={{ display:"none" }}
+                    onChange={e => { const f = e.target.files?.[0]; importBackup(f); e.target.value = ""; }}
+                  />
+                  <button onClick={()=>importInputRef.current?.click()} title="Restaurar la liga desde un archivo JSON" style={{
+                    fontSize:12, fontWeight:700, cursor:"pointer", fontFamily:"'Oswald',sans-serif",
+                    color:"var(--silver)", background:"rgba(0,0,0,0.45)",
+                    padding:"5px 11px", borderRadius:999, border:"1px solid var(--line)",
+                    backdropFilter:"blur(4px)", textTransform:"uppercase", letterSpacing:".04em"
+                  }}>⬆ Importar</button>
+                </>
               )}
               <button onClick={toggleLock} title={unlocked?"Bloquear edición":"Desbloquear edición"} style={{
                 fontSize:12, fontWeight:700, cursor:"pointer", fontFamily:"'Oswald',sans-serif",
