@@ -2189,8 +2189,13 @@ function AdminManager({ state, setState, logAction }) {
               style={{ ...inputStyle, flex:1, minWidth:140 }}
             />
             <input
+              type="password"
               value={a.pin}
               onChange={e => updateAdmin(a.id, { pin: e.target.value })}
+              onCopy={e => e.preventDefault()}
+              onCut={e => e.preventDefault()}
+              onContextMenu={e => e.preventDefault()}
+              autoComplete="new-password"
               placeholder="PIN"
               style={{ ...inputStyle, width:140 }}
             />
@@ -2202,7 +2207,7 @@ function AdminManager({ state, setState, logAction }) {
         <Label>Añadir administrador</Label>
         <div style={{ display:"flex", gap:8, flexWrap:"wrap", alignItems:"center" }}>
           <input value={newName} onChange={e=>setNewName(e.target.value)} placeholder="Nombre" style={{ ...inputStyle, flex:1, minWidth:140 }} />
-          <input value={newPin} onChange={e=>setNewPin(e.target.value)} placeholder="PIN (mín. 4)" style={{ ...inputStyle, width:140 }} />
+          <input type="password" value={newPin} onChange={e=>setNewPin(e.target.value)} onCopy={e=>e.preventDefault()} onCut={e=>e.preventDefault()} onContextMenu={e=>e.preventDefault()} autoComplete="new-password" placeholder="PIN (mín. 4)" style={{ ...inputStyle, width:140 }} />
           <button onClick={addAdmin} style={btnPrimary}>Añadir</button>
         </div>
       </div>
